@@ -13,6 +13,12 @@ import type { Model } from '$lib/settings';
 
 import type { ChatStrategy } from './index';
 
+// Ollama streaming chat can return message.thinking and message.content (thinking-capable models)
+interface StreamMessage {
+	content?: string;
+	thinking?: string;
+}
+
 export interface OllamaOptions {
 	numa: boolean;
 	num_ctx: number;
@@ -55,12 +61,14 @@ export class OllamaStrategy implements ChatStrategy {
 	async chat(
 		payload: ChatRequest,
 		abortSignal: AbortSignal,
-		onChunk: (content: string) => void
+		onChunk: (part: { content?: string; thinking?: string }) => void
 	): Promise<void> {
+		// Enable thinking stream for reasoning models (qwen3, deepseek-r1, etc.)
+		const body = { ...payload, think: true };
 		const response = await fetch(`${this.server.baseUrl}/api/chat`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'text/event-stream' },
-			body: JSON.stringify(payload),
+			body: JSON.stringify(body),
 			signal: abortSignal
 		});
 
@@ -83,8 +91,16 @@ export class OllamaStrategy implements ChatStrategy {
 			const chatResponses = value.split('\n').filter((line) => line);
 
 			for (const chatResponse of chatResponses) {
-				const { message } = JSON.parse(chatResponse) as ChatResponse;
-				onChunk(message.content);
+				const parsed = JSON.parse(chatResponse) as ChatResponse & { message?: StreamMessage };
+				const message = parsed.message;
+				if (!message) continue;
+				// Stream thinking and content separately; API sends them in separate chunks
+				if (message.thinking != null) {
+					onChunk({ thinking: message.thinking });
+				}
+				if (message.content != null) {
+					onChunk({ content: message.content });
+				}
 			}
 		}
 	}

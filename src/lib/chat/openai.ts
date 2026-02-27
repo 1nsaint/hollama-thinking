@@ -23,7 +23,7 @@ export class OpenAIStrategy implements ChatStrategy {
 	async chat(
 		payload: ChatRequest,
 		abortSignal: AbortSignal,
-		onChunk: (content: string) => void
+		onChunk: (part: { content?: string; thinking?: string }) => void
 	): Promise<void> {
 		const formattedMessages = payload.messages.map(
 			(message: Message): ChatCompletionMessageParam => {
@@ -68,7 +68,8 @@ export class OpenAIStrategy implements ChatStrategy {
 
 		for await (const chunk of response) {
 			if (abortSignal.aborted) break;
-			onChunk(chunk.choices[0].delta.content || '');
+			const text = chunk.choices[0].delta.content || '';
+			if (text) onChunk({ content: text });
 		}
 	}
 
